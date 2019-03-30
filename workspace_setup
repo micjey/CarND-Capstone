@@ -1,0 +1,7 @@
+sudo apt-get update
+sudo apt-get install -y ros-kinetic-dbw-mkz-msgs
+cd /home/workspace/CarND-Capstone/ros
+rosdep install --from-paths src --ignore-src --rosdistro=kinetic -y
+
+pip uninstall catkin_pkg
+pip install -U catkin_pkg==0.4.10
