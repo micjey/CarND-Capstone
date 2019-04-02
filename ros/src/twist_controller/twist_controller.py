@@ -1,66 +1,76 @@
-from pid import PID  
-from lowpass import LowPassFilter
-from yaw_controller import YawController
 import rospy
+from pid import PID
+from yaw_controller import YawController
+from lowpass import LowPassFilter
 
 GAS_DENSITY = 2.858
 ONE_MPH = 0.44704
 
-
 class Controller(object):
-    def __init__(self, vehicle_mass, fuel_capacity, wheel_base, wheel_radius, steer_ratio, min_speed, max_lat_accel, max_steer_angle, decel_limit, accel_limit, tor_limit):
-
-        self.vehicle_mass = vehicle_mass + GAS_DENSITY * fuel_capacity
-        self.wheel_base = wheel_base
-        self.wheel_radius = wheel_radius
-        self.tor_limit = tor_limit
-        self.accel_limit = accel_limit
-        self.decel_limit = decel_limit
+    def __init__(self, *args, **kwargs):
         
-        self.yaw_controller  = YawController(wheel_base, steer_ratio, min_speed, max_lat_accel, max_steer_angle)
-       
-        self.tau = 0.5
-        self.ts = 0.02
-        self.vel_lpf = LowPassFilter(self.tau, self.ts)
-
-        self.kp = 0.3
-        self.ki = 0.1
-        self.kd  = 0.022
-        self.min  = 0.0
-        self.max = 0.2
+        max_abs_angle = kwargs.get('max_steer_angle')        
+        self.fuel_capacity = kwargs.get('fuel_capacity')
+        self.vehicle_mass = kwargs.get('vehicle_mass')
+        self.wheel_radius = kwargs.get('wheel_radius')
+        self.accel_limit = kwargs.get('accel_limit')
+        self.decel_limit = kwargs.get('decel_limit')
+        self.brake_deadband = kwargs.get('brake_deadband')
+        self.max_acceleration = 1.5
+        self.wheel_base = kwargs.get('wheel_base')
+        self.steer_ratio = kwargs.get('steer_ratio')
+        self.max_steer_angle = kwargs.get('max_steer_angle')
+        self.max_lat_accel = kwargs.get('max_lat_accel')
         
+        self.throttle_controller = PID(0.3, 0.01, 0.1, 0, 0.2)
+        self.vel_lpf = LowPassFilter(0.5, 0.02)
+        self.brake_lpf = LowPassFilter(0.5, 0.02)
 
-        self.throttle_controller = PID(self.kp , self.ki, self.kd , self.min , self.max)
+        self.yaw_controller = YawController(
+            self.wheel_base, self.steer_ratio, 0.1,
+            self.max_lat_accel, self.max_steer_angle) 
+
+        total_vehicle_mass = self.vehicle_mass + self.fuel_capacity * GAS_DENSITY # 1.774,933
+        # max torque (1.0 throttle) and  max brake torque (deceleration lmt)
+        self.max_acc_torque = total_vehicle_mass * self.max_acceleration * self.wheel_radius #567
+        self.max_brake_torque = total_vehicle_mass * abs(self.decel_limit) * self.wheel_radius #2095
+        
         self.last_time = rospy.get_time()
 
-
-    def control(self, current_velocity, dbw_enabled, linear_velocity, angular_velocity):
-
+    def control(self,desired_linear_velocity,desired_angular_velocity,current_linear_velocity,dbw_enabled):
+        # TODO: Change the arg, kwarg list to suit your needs
         # Return throttle, brake, steer
         if not dbw_enabled:
             self.throttle_controller.reset()
-            return 0.0,0.0,0.0
+            return 0., 0., 0.
+       
+        current_linear_velocity = self.vel_lpf.filt(current_linear_velocity)
 
-        current_velocity = self.vel_lpf.filt(current_velocity)
-
-        steering  = self.yaw_controller.get_steering(linear_velocity, angular_velocity, current_velocity)
-
-        vel_error  = linear_velocity - current_velocity
+        steering = self.yaw_controller.get_steering(desired_linear_velocity,desired_angular_velocity, current_linear_velocity)
         
-        current_time  = rospy.get_time()
-        sample_time  = current_time  - self.last_time
+        velocity_error = desired_linear_velocity - current_linear_velocity
+        velocity_error = max(self.decel_limit,velocity_error)
+        velocity_error = min(velocity_error,self.accel_limit)
+
+        self.last_vel = current_linear_velocity
+        
+        # find the time duration and a new timestamp
+        current_time = rospy.get_time()
+        sample_time = current_time - self.last_time
         self.last_time = current_time
+        
+        throttle = self.throttle_controller.step(velocity_error, sample_time)
+        brake = 0
+        
+        if desired_linear_velocity <= 0.3:
+            throttle = 0
+            brake = 0.4*self.max_brake_torque
+            if current_linear_velocity <= 0.3:
+                brake = self.max_brake_torque # Torque N*m
+        brake = min(brake,self.max_brake_torque)
+        brake = max(0.0, brake)
 
-        throttle  = self.throttle_controller.step(vel_error, sample_time)
-        brake = 0.0
+        brake = self.brake_lpf.filt(brake)
 
-        if linear_velocity == 0.0 and current_velocity < 0.1:
-            throttle = 0.0
-            brake = self.tor_limit #  NM this is mim torque required for Carla Car at idle
 
-        elif throttle < 0.1 and vel_error < 0.0:
-            throttle = 0.0
-            decel = max (vel_error , self.decel_limit)
-            brake  = abs(decel)* self.vehicle_mass * self.wheel_radius
-
-        return throttle , brake , steering
+        return throttle, brake, steering
