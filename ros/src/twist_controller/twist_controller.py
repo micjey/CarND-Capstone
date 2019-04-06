@@ -22,7 +22,7 @@ class Controller(object):
         self.max_steer_angle = kwargs.get('max_steer_angle')
         self.max_lat_accel = kwargs.get('max_lat_accel')
         
-        self.throttle_controller = PID(0.3, 0.01, 0.1, 0, 0.2)
+        self.throttle_controller = PID(0.3, 0.01, 0.05, 0, 0.2)
         self.vel_lpf = LowPassFilter(0.5, 0.02)
         self.brake_lpf = LowPassFilter(0.5, 0.02)
 
@@ -30,30 +30,25 @@ class Controller(object):
             self.wheel_base, self.steer_ratio, 0.1,
             self.max_lat_accel, self.max_steer_angle) 
 
-        total_vehicle_mass = self.vehicle_mass + self.fuel_capacity * GAS_DENSITY # 1.774,933
-        # max torque (1.0 throttle) and  max brake torque (deceleration lmt)
-        self.max_acc_torque = total_vehicle_mass * self.max_acceleration * self.wheel_radius #567
-        self.max_brake_torque = total_vehicle_mass * abs(self.decel_limit) * self.wheel_radius #2095
+        self.vehicle_mass = self.vehicle_mass + self.fuel_capacity * GAS_DENSITY # 1.774,933
+        self.max_acc_torque = self.vehicle_mass * self.max_acceleration * self.wheel_radius #567
+        self.max_brake_torque = self.vehicle_mass * abs(self.decel_limit) * self.wheel_radius #2095
         
         self.last_time = rospy.get_time()
 
-    def control(self,desired_linear_velocity,desired_angular_velocity,current_linear_velocity,dbw_enabled):
-        # TODO: Change the arg, kwarg list to suit your needs
-        # Return throttle, brake, steer
+    def control(self, desired_linear_velocity, desired_angular_velocity, current_linear_velocity, dbw_enabled):
         if not dbw_enabled:
             self.throttle_controller.reset()
             return 0., 0., 0.
        
         current_linear_velocity = self.vel_lpf.filt(current_linear_velocity)
 
-        steering = self.yaw_controller.get_steering(desired_linear_velocity,desired_angular_velocity, current_linear_velocity)
+        steering = self.yaw_controller.get_steering(desired_linear_velocity, desired_angular_velocity, current_linear_velocity)
         
         velocity_error = desired_linear_velocity - current_linear_velocity
         velocity_error = max(self.decel_limit,velocity_error)
         velocity_error = min(velocity_error,self.accel_limit)
-
-        self.last_vel = current_linear_velocity
-        
+  
         # find the time duration and a new timestamp
         current_time = rospy.get_time()
         sample_time = current_time - self.last_time
@@ -62,15 +57,19 @@ class Controller(object):
         throttle = self.throttle_controller.step(velocity_error, sample_time)
         brake = 0
         
-        if desired_linear_velocity <= 0.3:
+        #rospy.logwarn("publish desired_linear_velocity, current_linear_velocity, velocity_error: {},{},{}".format(desired_linear_velocity, current_linear_velocity, velocity_error))
+        
+        if desired_linear_velocity == 0.0 and current_linear_velocity < 0.1:
             throttle = 0
-            brake = 0.4*self.max_brake_torque
-            if current_linear_velocity <= 0.3:
-                brake = self.max_brake_torque # Torque N*m
+            brake = self.max_brake_torque # Torque N*m
+
+        elif throttle < .1 and velocity_error < 0:
+            throttle = 0
+            decel = max(velocity_error, self.decel_limit)
+            brake = abs(decel)*self.vehicle_mass*self.wheel_radius # Torque N*m
+   
+        
         brake = min(brake,self.max_brake_torque)
         brake = max(0.0, brake)
-
-        brake = self.brake_lpf.filt(brake)
-
 
         return throttle, brake, steering

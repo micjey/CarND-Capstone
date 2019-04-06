@@ -76,10 +76,10 @@ class TLDetector(object):
                 light_wp = light_wp if state == TrafficLight.RED else -1
                 self.last_wp = light_wp
                 self.upcoming_red_light_pub.publish(Int32(light_wp))
-                rospy.loginfo("publish light wp index: {}".format(light_wp))
+                #rospy.loginfo("publish light wp index: {}".format(light_wp))
             else:
                 self.upcoming_red_light_pub.publish(Int32(self.last_wp))
-                rospy.loginfo("publish light wp index: {}".format(light_wp))
+                #rospy.loginfo("publish light wp index: {}".format(light_wp))
             self.state_count += 1
             rate.sleep()
         
@@ -91,10 +91,11 @@ class TLDetector(object):
 
     def waypoints_cb(self, waypoints):
         self.waypoints = waypoints
-        self.waypoints_2d = [[wp.pose.pose.position.x, 
-                              wp.pose.pose.position.y] for wp in waypoints.waypoints]
-        self.waypoint_tree = KDTree(self.waypoints_2d)
-        self.base_waypoints_sub.unregister()
+        
+        if self.waypoints_2d == None:
+            self.waypoints_2d = [[wp.pose.pose.position.x, 
+                                  wp.pose.pose.position.y] for wp in waypoints.waypoints]
+            self.waypoint_tree = KDTree(self.waypoints_2d)
 
     def traffic_cb(self, msg):
         self.lights = msg.lights
@@ -232,7 +233,7 @@ class TLDetector(object):
         if closest_light:
             state = self.get_light_state(closest_light)
             rospy.loginfo("Closest stop waypoint index: {}, state: {}".format(best_stop_line_index, self.light_to_string(state)))
-            return best_stop_line_index-1, state
+            return best_stop_line_index, state
 
         return -1, TrafficLight.UNKNOWN
 

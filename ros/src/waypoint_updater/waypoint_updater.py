@@ -22,7 +22,8 @@ TODO (for Yousuf and Aaron): Stopline location for each traffic light.
 '''
 
 LOOKAHEAD_WPS = 100 # Number of waypoints we will publish. You can change this number
-MAX_DECEL = .5
+MAX_DECEL = 0.5
+STOP_LINE_COUNT_BEFORE = 5
 
 class WaypointUpdater(object):
     def __init__(self):
@@ -32,6 +33,7 @@ class WaypointUpdater(object):
         self.pose = None
         self.waypoints_2d = None
         self.waypoint_tree = None
+        self.track_waypoint_count = -1
         self.stopline_wp_idx = -1
         
         rospy.Subscriber('/current_pose', PoseStamped, self.pose_cb)
@@ -42,7 +44,7 @@ class WaypointUpdater(object):
         self.loop()
 
     def loop(self):
-        rate = rospy.Rate(50)
+        rate = rospy.Rate(30)
         while not rospy.is_shutdown():
             if self.pose and self.base_lane and self.waypoint_tree:
                 self.publish_waypoints()
@@ -69,12 +71,17 @@ class WaypointUpdater(object):
         return closest_idx
 
     def publish_waypoints(self):
-        #if self.pose is None or self.base_lane is None:
-        #    return
         lane = Lane()
         closest_index = self.get_closest_waypoint_idx()
         last_index = closest_index + LOOKAHEAD_WPS
-        base_waypoints = self.base_lane.waypoints[closest_index:last_index]
+        
+        if last_index < self.track_waypoint_count:
+            base_waypoints = self.base_lane.waypoints[closest_index:last_index]
+        else:
+            index_offset = last_index - self.track_waypoint_count
+            last_index = self.track_waypoint_count - 2
+            base_waypoints = self.base_lane.waypoints[closest_index:last_index]
+            base_waypoints += self.base_lane.waypoints[0:index_offset]
         
         if self.stopline_wp_idx == -1 or self.stopline_wp_idx >= last_index:
             lane.waypoints = base_waypoints
@@ -88,7 +95,7 @@ class WaypointUpdater(object):
         for i, wp in enumerate(waypoints):
             p = Waypoint()
             p.pose = wp.pose
-            stop_index = max(self.stopline_wp_idx - closest_index - 2, 0)
+            stop_index = max(self.stopline_wp_idx - closest_index - STOP_LINE_COUNT_BEFORE, 0)
             dist = self.distance(waypoints, i, stop_index)
             vel = math.sqrt(2 * MAX_DECEL * dist)
             if vel < 1.0:
@@ -103,10 +110,12 @@ class WaypointUpdater(object):
 
     def waypoints_cb(self, waypoints):
         self.base_lane = waypoints
-        self.waypoints_2d = [[wp.pose.pose.position.x, wp.pose.pose.position.y] for wp in waypoints.waypoints]
-        self.waypoint_tree = KDTree(self.waypoints_2d)
-        self.base_waypoints_subscriber.unregister()
-
+        self.track_waypoint_count = len(waypoints.waypoints)
+        
+        if self.waypoints_2d == None:
+            self.waypoints_2d = [[wp.pose.pose.position.x, wp.pose.pose.position.y] for wp in waypoints.waypoints]
+            self.waypoint_tree = KDTree(self.waypoints_2d)
+           
     def traffic_cb(self, msg):
         self.stopline_wp_idx = msg.data    
     pass
