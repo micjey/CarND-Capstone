@@ -14,6 +14,8 @@ import yaml
 
 STATE_COUNT_THRESHOLD = 3
 IMAGE_PROCESSING_COUNT_THRESHOLD = 2
+USE_SIMULATOR_INPUT = False
+MAX_WAYPOINTS_FROM_TARGET = 150
 
 class TLDetector(object):
     def __init__(self):
@@ -43,7 +45,7 @@ class TLDetector(object):
         rely on the position of the light and the camera image to predict it.
         '''
         sub3 = rospy.Subscriber('/vehicle/traffic_lights', TrafficLightArray, self.traffic_cb)
-        sub6 = rospy.Subscriber('/image_color', Image, self.image_cb)
+        sub6 = rospy.Subscriber('/image_color', Image, self.image_cb, queue_size=1, buff_size=2*52428800)
 
         config_string = rospy.get_param("/traffic_light_config")
         self.config = yaml.load(config_string)
@@ -57,34 +59,34 @@ class TLDetector(object):
         self.light_classifier = TLClassifier()
         self.listener = tf.TransformListener()
 
-        
-        rate = rospy.Rate(50) # 50Hz
-        while not rospy.is_shutdown():
-            light_wp, state = self.process_traffic_lights()
+        if USE_SIMULATOR_INPUT:
+            rate = rospy.Rate(50) # 50Hz
+            while not rospy.is_shutdown():
+                light_wp, state = self.process_traffic_lights()
 
-            '''
-            Publish upcoming red lights at camera frequency.
-            Each predicted state has to occur `STATE_COUNT_THRESHOLD` number
-            of times till we start using it. Otherwise the previous stable state is
-            used.
-            '''
-            if self.state != state:
-                self.state_count = 0
-                self.state = state
-            elif self.state_count >= STATE_COUNT_THRESHOLD:
-                self.last_state = self.state
-                light_wp = light_wp if state == TrafficLight.RED else -1
-                self.last_wp = light_wp
-                self.upcoming_red_light_pub.publish(Int32(light_wp))
-                #rospy.loginfo("publish light wp index: {}".format(light_wp))
-            else:
-                self.upcoming_red_light_pub.publish(Int32(self.last_wp))
-                #rospy.loginfo("publish light wp index: {}".format(light_wp))
-            self.state_count += 1
-            rate.sleep()
+                '''
+                Publish upcoming red lights at camera frequency.
+                Each predicted state has to occur `STATE_COUNT_THRESHOLD` number
+                of times till we start using it. Otherwise the previous stable state is
+                used.
+                '''
+                if self.state != state:
+                    self.state_count = 0
+                    self.state = state
+                elif self.state_count >= STATE_COUNT_THRESHOLD:
+                    self.last_state = self.state
+                    light_wp = light_wp if state == TrafficLight.RED else -1
+                    self.last_wp = light_wp
+                    self.upcoming_red_light_pub.publish(Int32(light_wp))
+                    #rospy.loginfo("publish light wp index: {}".format(light_wp))
+                else:
+                    self.upcoming_red_light_pub.publish(Int32(self.last_wp))
+                    #rospy.loginfo("publish light wp index: {}".format(light_wp))
+                self.state_count += 1
+                rate.sleep()
         
 
-        #rospy.spin()
+        rospy.spin()
 
     def pose_cb(self, msg):
         self.pose = msg
@@ -167,7 +169,8 @@ class TLDetector(object):
             int: ID of traffic light color (specified in styx_msgs/TrafficLight)
 
         """
-        return light.state
+        if USE_SIMULATOR_INPUT:
+            return light.state
         
         
         if(not self.has_image):
@@ -230,7 +233,7 @@ class TLDetector(object):
                 closest_light = light
                 best_stop_line_index = stop_line_index
 
-        if closest_light:
+        if closest_light and best_index_distance < MAX_WAYPOINTS_FROM_TARGET:
             state = self.get_light_state(closest_light)
             rospy.loginfo("Closest stop waypoint index: {}, state: {}".format(best_stop_line_index, self.light_to_string(state)))
             return best_stop_line_index, state

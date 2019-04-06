@@ -8,7 +8,7 @@ TL_THREHOLD = 0.5
 
 MODELS_FOLDER = '/tl_perception_models/'
 
-MODEL_FILENAME = "tl_model.pb"
+MODEL_FILENAME = "test_frozen_inference_graph_sim.pb"#"quantized_optimized_inference_graph.pb" #"tl_model.pb"
 
 NUM_CLASSES = 4
 
