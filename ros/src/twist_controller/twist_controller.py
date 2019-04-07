@@ -24,15 +24,13 @@ class Controller(object):
         
         self.throttle_controller = PID(0.3, 0.01, 0.05, 0, 0.2)
         self.vel_lpf = LowPassFilter(0.5, 0.02)
-        self.brake_lpf = LowPassFilter(0.5, 0.02)
+        
+        self.yaw_controller = YawController(self.wheel_base, self.steer_ratio, 0.1,
+                                            self.max_lat_accel, self.max_steer_angle) 
 
-        self.yaw_controller = YawController(
-            self.wheel_base, self.steer_ratio, 0.1,
-            self.max_lat_accel, self.max_steer_angle) 
-
-        self.vehicle_mass = self.vehicle_mass + self.fuel_capacity * GAS_DENSITY # 1.774,933
-        self.max_acc_torque = self.vehicle_mass * self.max_acceleration * self.wheel_radius #567
-        self.max_brake_torque = self.vehicle_mass * abs(self.decel_limit) * self.wheel_radius #2095
+        self.vehicle_mass = self.vehicle_mass + self.fuel_capacity * GAS_DENSITY
+        self.max_acc_torque = self.vehicle_mass * self.max_acceleration * self.wheel_radius
+        self.max_brake_torque = self.vehicle_mass * abs(self.decel_limit) * self.wheel_radius
         
         self.last_time = rospy.get_time()
 
@@ -46,8 +44,8 @@ class Controller(object):
         steering = self.yaw_controller.get_steering(desired_linear_velocity, desired_angular_velocity, current_linear_velocity)
         
         velocity_error = desired_linear_velocity - current_linear_velocity
-        velocity_error = max(self.decel_limit,velocity_error)
-        velocity_error = min(velocity_error,self.accel_limit)
+        velocity_error = max(self.decel_limit, velocity_error)
+        velocity_error = min(velocity_error, self.accel_limit)
   
         # find the time duration and a new timestamp
         current_time = rospy.get_time()
@@ -61,13 +59,12 @@ class Controller(object):
         
         if desired_linear_velocity == 0.0 and current_linear_velocity < 0.1:
             throttle = 0
-            brake = self.max_brake_torque # Torque N*m
+            brake = self.max_brake_torque
 
         elif throttle < .1 and velocity_error < 0:
             throttle = 0
             decel = max(velocity_error, self.decel_limit)
-            brake = abs(decel)*self.vehicle_mass*self.wheel_radius # Torque N*m
-   
+            brake = abs(decel)*self.vehicle_mass*self.wheel_radius
         
         brake = min(brake,self.max_brake_torque)
         brake = max(0.0, brake)

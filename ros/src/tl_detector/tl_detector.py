@@ -64,12 +64,6 @@ class TLDetector(object):
             while not rospy.is_shutdown():
                 light_wp, state = self.process_traffic_lights()
 
-                '''
-                Publish upcoming red lights at camera frequency.
-                Each predicted state has to occur `STATE_COUNT_THRESHOLD` number
-                of times till we start using it. Otherwise the previous stable state is
-                used.
-                '''
                 if self.state != state:
                     self.state_count = 0
                     self.state = state
@@ -78,13 +72,10 @@ class TLDetector(object):
                     light_wp = light_wp if state == TrafficLight.RED else -1
                     self.last_wp = light_wp
                     self.upcoming_red_light_pub.publish(Int32(light_wp))
-                    #rospy.loginfo("publish light wp index: {}".format(light_wp))
                 else:
                     self.upcoming_red_light_pub.publish(Int32(self.last_wp))
-                    #rospy.loginfo("publish light wp index: {}".format(light_wp))
                 self.state_count += 1
                 rate.sleep()
-        
 
         rospy.spin()
 
