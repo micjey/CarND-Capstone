@@ -1,14 +1,15 @@
 from styx_msgs.msg import TrafficLight
 import rospy
 import os
+import cv2
 import numpy as np
 import tensorflow as tf
 import yaml
 
 TRAFFIC_LIGHT_SCORE_THRESHOLD = 0.5
 MODELS_DIRECTORY = '/traffic_light_models/'
-MODEL_FILENAME_SIM = "test_frozen_inference_graph_sim.pb"
-MODEL_FILENAME_REAL = "test_frozen_inference_graph_sim.pb"
+MODEL_FILENAME_SIM = "frozen_inference_graph_traffic_130.pb"
+MODEL_FILENAME_REAL = "frozen_inference_graph_real_merged_130.pb"
 
 class TLClassifier(object):
 
@@ -62,22 +63,62 @@ class TLClassifier(object):
 
         scores = np.squeeze(scores)
         classes = np.squeeze(classes).astype(np.int32)
-        predicted_traffic_light = self.detect_traffic_light(scores, scores.argmax(), classes)
-    
+        predicted_traffic_light = self.detect_traffic_light(boxes, scores, classes, num, image)
         return predicted_traffic_light
     
-    def detect_traffic_light(self, scores, highest_score_idx, classes):
+    def create_feature(self, rgb_image):
+        
+        #Convert image to HSV color space
+        hsv = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2HSV)
+
+        #Create and return a feature value and/or vector
+        brightness_channel = hsv[:,:,2]
+        rows = brightness_channel.shape[0]
+        cols = brightness_channel.shape[1]
+        mid = int(cols/2)
+
+        red_region = brightness_channel[:int(rows/3),(mid-10):(mid+10)]
+        yellow_region = brightness_channel[int(rows/3):int(2*rows/3),(mid-10):(mid+10)]
+        green_region = brightness_channel[int(2*rows/3):,(mid-10):(mid+10)]
+
+        feature = [0,0,0]
+        feature[0] = np.mean(green_region)
+        feature[1] = np.mean(red_region)
+        feature[2] = np.mean(yellow_region)
+
+        return feature
+    
+    def predict_traffic_class(self,traffic_img):
+        standard_im = cv2.resize(np.copy(traffic_img), (32, 32))
+        rgb_image = cv2.cvtColor(standard_im, cv2.COLOR_BGR2RGB)
+        max_index = np.argmax(self.create_feature(rgb_image)) + 1
+        
         predicted_traffic_light = TrafficLight.UNKNOWN
         
-        if scores[highest_score_idx] > TRAFFIC_LIGHT_SCORE_THRESHOLD:
-            rospy.logwarn("Current traffic light: {}".format(self.label_dict[classes[highest_score_idx]]['name']))
-            if classes[highest_score_idx] == 1:
-                predicted_traffic_light = TrafficLight.GREEN
-            elif classes[highest_score_idx] == 2:
-                predicted_traffic_light = TrafficLight.RED
-            elif classes[highest_score_idx] == 3:
-                predicted_traffic_light = TrafficLight.YELLOW
-        else:
-            rospy.logwarn("Could not find any traffic light.")
+        if max_index == 1:
+            predicted_traffic_light = TrafficLight.GREEN
+        elif max_index == 2:
+            predicted_traffic_light = TrafficLight.RED
+        elif max_index == 3:
+            predicted_traffic_light = TrafficLight.YELLOW
+
+        return predicted_traffic_light
+    
+    def detect_traffic_light(self, boxes, scores, classes, num, bgr_img):
+        image = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2RGB)
+        im_height, im_width, channels = image.shape
+     
+        predicted_traffic_light = TrafficLight.UNKNOWN
+        opt_idx = scores.argmax()
+        
+        if scores[opt_idx] > TRAFFIC_LIGHT_SCORE_THRESHOLD:
+            ymin = int(boxes[0,opt_idx,0]*im_height)
+            xmin = int(boxes[0,opt_idx,1]*im_width)
+            ymax = int(boxes[0,opt_idx,2]*im_height)
+            xmax = int(boxes[0,opt_idx,3]*im_width)
+       
+            traffic_img = image[ymin:ymax,xmin:xmax]
+            predicted_traffic_light = self.predict_traffic_class(traffic_img)
             
         return predicted_traffic_light
+    
